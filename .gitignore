@@ -1,0 +1,12 @@
+# Local state / secrets — never commit
+token
+*.pid
+*.pid.meta
+monitor.log
+messages.log*
+server.log
+*.session
+*.lock
+__pycache__/
+*.pyc
+/tmp/
