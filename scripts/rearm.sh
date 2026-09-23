@@ -14,7 +14,7 @@
 #
 # Usage:
 #   rearm.sh <name> [skill_bin_dir]
-#   NAME        listener name (e.g. "nebula", "crafthost")
+#   NAME        listener name (e.g. "server-a", "server-b")
 #   SKILL_BIN   optional: plugin bin/ dir (defaults to the newest
 #               ~/.claude/plugins/cache/inter-session/*/*/skills/inter-session/bin)
 #

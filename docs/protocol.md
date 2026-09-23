@@ -19,7 +19,7 @@ here so cross-server operators understand what the bridge carries.
 Agent role (the per-session listener, `client.py`):
 
 ```json
-{"op": "hello", "session_id": "<uuid>", "name": "nebula", "label": "",
+{"op": "hello", "session_id": "<uuid>", "name": "server-a", "label": "",
  "cwd": "/home/x", "pid": 1234, "role": "agent",
  "token": "<bus token>", "nonce": "<urlsafe-16>"}
 ```
