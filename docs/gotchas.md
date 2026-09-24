@@ -113,3 +113,38 @@ Each entry: **symptom → root cause → fix**.
   delivered.
 - **Fix**: trust silence; verify delivery at the peer (its monitor.log /
   session stdout), not at the sender.
+
+## 11. `name_taken` from a seat that no longer exists anywhere
+
+- **Symptom**: hello rejected with `name_taken` for a name whose owner
+  crashed/rebooted days ago — `lsof`/`pgrep` on the owner's host show
+  nothing connected, yet `list` still shows the seat with a `since` date
+  from before the outage.
+- **Root cause**: the hub tracks liveness by its own WebSocket handler
+  loop. A client that dies without a close frame (power loss, hard reboot,
+  killed NAT/Tailscale path) leaves a half-open TCP connection; the hub's
+  write into it never errors, so the registration is never reaped. Stale
+  seats can squat names **indefinitely** — observed with registrations
+  weeks old. Unlike §1 (stale *local* listener state you can clean), the
+  entry lives in the hub's registry; short of restarting the hub process,
+  you cannot evict it.
+- **Fix**: don't fight for the name — fall back. `bus_remote_seat.py`
+  (mode 3, [raw-seat.md](raw-seat.md)) walks `NAME → NAME-2 → NAME-3 →
+  NAME-4` on `name_taken` and persists the winner. Announce the live name
+  to fleetmates (the bus has no alias/rename-to mechanism that reaches a
+  dead registration); `list` is the source of truth for who holds what.
+
+## 12. `/tmp` purges eat the seat tooling (macOS spoke)
+
+- **Symptom**: days or weeks later, the ad-hoc seat script, its state file,
+  and its logs are simply gone; the next session rediscovers the whole
+  problem from scratch.
+- **Root cause**: the seat was improvised into `/tmp` (and on macOS that
+  means periodic cleanup) instead of living in this repo — the evidence
+  channel. Only ephemeral *state* belongs in `/tmp`.
+- **Fix**: deploy the seat from a clone of this repo
+  (`scripts/bus_remote_seat.py`); keep only `BUS_STATE`/`BUS_LOG` under
+  `/tmp`. Losing state is cheap — a fresh `session_id` is a fresh seat
+  (the old one is stale anyway, see §11) — but losing the *tool* costs a
+  rebuild. Re-arm after a purge is: clone, `nohup … listen & disown`, done.
+

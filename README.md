@@ -59,6 +59,14 @@ Server B's sessions talk to `127.0.0.1:9473` (the bridge), which forwards to
 server A's real bus on `100.a.b.c:9474`. Server A's sessions talk to their
 local bus directly. Both directions work; broadcasts reach everyone.
 
+A **third mode** exists for a machine where even the bridge is the wrong
+tool (the plugin's client keeps pinning to a machine-local hub, or the box
+isn't a Claude Code host at all): skip the plugin entirely and speak the
+wire protocol straight to the hub — `scripts/bus_remote_seat.py` is a raw
+WebSocket seat with a persistent listener, a one-shot sender, and a
+peer-list probe, plus a name-fallback ladder for stale hub-side
+registrations. See [docs/raw-seat.md](docs/raw-seat.md).
+
 ## Two-lane operating model
 
 - **Bus = fast lane.** Sub-second, bidirectional, ephemeral. Coordination
@@ -148,11 +156,15 @@ green = done.
 - Sending (from any session on either server): the skill's
   `/inter-session send <name> <text>` / `broadcast`, or the
   `scripts/sendmsg.sh` wrapper here.
+- Sending from a mode-3 machine (no plugin): `scripts/bus_remote_seat.py
+  send <name> <text>` — same silence semantics, and it requires the seat's
+  own `listen` to be running (control hellos bind to a live listener).
 - **Success is silence.** `send.py` only prints when the server sends an
   *error frame*; no output + exit 0 means delivered. Don't retry on silence.
 - Receiving: each session's monitor (`client.py`) prints one stdout line per
   message; long messages arrive as a `[... truncated=N]` line plus a
-  `[... cont] full text N bytes at <messages.log>` pointer.
+  `[... cont] full text N bytes at <messages.log>` pointer. On a mode-3
+  seat, inbound frames append to the raw log (`/tmp/bus_remote.log`).
 
 ## Security model
 
