@@ -133,6 +133,13 @@ Each entry: **symptom → root cause → fix**.
   NAME-4` on `name_taken` and persists the winner. Announce the live name
   to fleetmates (the bus has no alias/rename-to mechanism that reaches a
   dead registration); `list` is the source of truth for who holds what.
+- **Caveat — old ≠ dead.** A seat with a weeks-old `since` date may be a
+  perfectly healthy headless listener launched with a 1-year idle shutdown
+  (§7 fix); it looks identical to a squatter in `list`. Before treating a
+  name as squatted, send it a ping or check the owner host for a live
+  connection — production has both at once: one seat held by a live
+  headless client since day X, another squatted by a client that died
+  around the same time. `name_taken` alone doesn't tell you which is which.
 
 ## 12. `/tmp` purges eat the seat tooling (macOS spoke)
 
