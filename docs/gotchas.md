@@ -150,8 +150,12 @@ Each entry: **symptom → root cause → fix**.
   means periodic cleanup) instead of living in this repo — the evidence
   channel. Only ephemeral *state* belongs in `/tmp`.
 - **Fix**: deploy the seat from a clone of this repo
-  (`scripts/bus_remote_seat.py`); keep only `BUS_STATE`/`BUS_LOG` under
-  `/tmp`. Losing state is cheap — a fresh `session_id` is a fresh seat
-  (the old one is stale anyway, see §11) — but losing the *tool* costs a
-  rebuild. Re-arm after a purge is: clone, `nohup … listen & disown`, done.
+  (`scripts/bus_remote_seat.py`) — and since 02/10 the **state and log are
+  durable by default** too: `~/.claude/data/inter-session/seats/<name>.{json,log}`
+  (script defaults + `scripts/listen.sh` launcher). The original "losing
+  state is cheap" call was wrong in practice: a lost `session_id` means the
+  `name_taken` fallback ladder of §11 and a seat renamed `craftlead-2`.
+  Set `BUS_STATE`/`BUS_LOG` only if you genuinely want ephemeral state.
+  Re-arm after a purge or reboot is: clone, `./scripts/listen.sh <name>
+  <hub>`, done.
 

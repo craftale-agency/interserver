@@ -24,13 +24,10 @@ When this is the right mode:
 ## Usage
 
 ```bash
-export BUS_HUB=ws://100.a.b.c:9473/      # the hub, as reachable FROM here
-export BUS_NAME=spoke                     # your seat's base name
-
-# Persistent seat — spawn DETACHED, and leave it running:
-nohup ~/.claude/data/inter-session/venv/bin/python -u \
-  scripts/bus_remote_seat.py listen \
-  >> /tmp/bus_remote_seat.out 2>&1 & disown
+# Persistent seat — the launcher spawns it detached (nohup/disown) with
+# durable state+log (see below). Re-run the same command to re-arm after
+# a reboot:
+./scripts/listen.sh spoke ws://100.a.b.c:9473/
 
 # One-shot send (success is silence — see gotchas.md §10):
 scripts/bus_remote_seat.py send hub "ping: raw seat E2E test"
@@ -39,23 +36,35 @@ scripts/bus_remote_seat.py send hub "ping: raw seat E2E test"
 scripts/bus_remote_seat.py list
 ```
 
+Manual equivalent of the launcher (if you'd rather not use it):
+
+```bash
+export BUS_HUB=ws://100.a.b.c:9473/      # the hub, as reachable FROM here
+export BUS_NAME=spoke                     # your seat's base name
+nohup ~/.claude/data/inter-session/venv/bin/python -u \
+  scripts/bus_remote_seat.py listen \
+  >> ~/.claude/data/inter-session/seats/spoke.log 2>&1 & disown
+```
+
 Interpreter: any Python 3.10+ with `websockets`; the plugin's venv at
 `~/.claude/data/inter-session/venv` already qualifies.
 
 ## Local state & logs
 
-- `BUS_STATE` (default `/tmp/bus_remote_session.json`) — `session_id`,
+- `BUS_STATE` (default
+  `~/.claude/data/inter-session/seats/<name>.json`) — `session_id`,
   `nonce`, and the name the seat won. Persisted and **reused**: a restart
   reconnect-replaces the old registration cleanly (same session_id +
   matching nonce) instead of colliding with itself.
-- `BUS_LOG` (default `/tmp/bus_remote.log`) — every inbound frame, one JSON
-  per line, timestamped. This is your "monitor.log": replies from peers land
-  here (the hub does not queue for disconnected seats, so the listener must
-  be up when the reply arrives).
+- `BUS_LOG` (default `~/.claude/data/inter-session/seats/<name>.log`) —
+  every inbound frame, one JSON per line, timestamped. This is your
+  "monitor.log": replies from peers land here (the hub does not queue for
+  disconnected seats, so the listener must be up when the reply arrives).
 
-Both defaults live in `/tmp` deliberately (ephemeral seat, ephemeral
-state) — but see gotchas.md §12 for what that costs on macOS, and why the
-script itself belongs in this repo, not in `/tmp`.
+Defaults are **durable** (02/10, gotchas.md §12 follow-up: `/tmp` purges on
+macOS ate the improvised seat, and a lost `session_id` costs the
+`name_taken` fallback ladder — gotchas.md §11). Set `BUS_STATE`/`BUS_LOG`
+explicitly only if you genuinely want ephemeral state.
 
 ## Name fallback
 
@@ -74,4 +83,5 @@ fleetmates when your seat name shifts — the bus has no alias mechanism.
   hub); same rule as the bridge — the bus is the fast lane, git is the
   evidence channel.
 - No idle-shutdown management: the seat stays until its process dies.
-  Re-arm after reboots the same way you spawn it (nohup/cron `@reboot`).
+  Re-arm after reboots with `scripts/listen.sh <name> <hub>` (cron `@reboot`
+  wrapping it works too).

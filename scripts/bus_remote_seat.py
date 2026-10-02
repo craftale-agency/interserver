@@ -15,8 +15,12 @@ Modes:
 Config (env):
   BUS_HUB    hub endpoint          (default ws://127.0.0.1:9473/)
   BUS_NAME   seat base name        (default "seat"; fallbacks -2, -3, -4)
-  BUS_STATE  state file path       (default /tmp/bus_remote_session.json)
-  BUS_LOG    inbound log path      (default /tmp/bus_remote.log)
+  BUS_STATE  state file path       (default ~/.claude/data/inter-session/seats/<name>.json)
+  BUS_LOG    inbound log path      (default ~/.claude/data/inter-session/seats/<name>.log)
+
+Defaults are DURABLE (02/10 follow-up to gotchas #12: /tmp purges on macOS
+ate the improvised seat; a lost session_id means name_taken ladder noise).
+Override with the env vars only if you genuinely want ephemeral state.
 
 Token: read from ~/.claude/data/inter-session/token (fleet-shared, 0600,
 never printed or committed).
@@ -48,9 +52,12 @@ import websockets
 
 HUB = os.environ.get("BUS_HUB", "ws://127.0.0.1:9473/")
 BASE_NAME = os.environ.get("BUS_NAME", "seat")
-STATE = Path(os.environ.get("BUS_STATE", "/tmp/bus_remote_session.json"))
-LOG = Path(os.environ.get("BUS_LOG", "/tmp/bus_remote.log"))
+_SEAT_DIR = Path.home() / ".claude/data/inter-session/seats"
+STATE = Path(os.environ.get("BUS_STATE", str(_SEAT_DIR / f"{BASE_NAME}.json")))
+LOG = Path(os.environ.get("BUS_LOG", str(_SEAT_DIR / f"{BASE_NAME}.log")))
 TOKEN_PATH = Path.home() / ".claude/data/inter-session/token"
+STATE.parent.mkdir(parents=True, exist_ok=True)
+LOG.parent.mkdir(parents=True, exist_ok=True)
 
 
 def token() -> str:

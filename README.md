@@ -164,7 +164,9 @@ green = done.
 - Receiving: each session's monitor (`client.py`) prints one stdout line per
   message; long messages arrive as a `[... truncated=N]` line plus a
   `[... cont] full text N bytes at <messages.log>` pointer. On a mode-3
-  seat, inbound frames append to the raw log (`/tmp/bus_remote.log`).
+  seat, inbound frames append to the durable raw log
+  (`~/.claude/data/inter-session/seats/<name>.log`; spawn via
+  `scripts/listen.sh <name> <hub>`).
 
 ## Security model
 
