@@ -1,0 +1,6 @@
+{
+  "name": "interserver",
+  "version": "0.1.0",
+  "description": "Federate the inter-session agent bus across tailnet machines: hub/spoke setup, doctor, rearm.",
+  "skills": "./skills"
+}

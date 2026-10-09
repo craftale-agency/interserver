@@ -1,0 +1,20 @@
+{
+  "name": "interserver",
+  "description": "Single-plugin marketplace for interserver: federate the inter-session agent bus across tailnet machines.",
+  "owner": {
+    "name": "Craftale",
+    "url": "https://github.com/craftale-agency"
+  },
+  "plugins": [
+    {
+      "name": "interserver",
+      "description": "Federate the inter-session plugin's agent bus across tailnet machines: hub/spoke lanes, doctor, rearm.",
+      "source": "./",
+      "version": "0.1.0",
+      "category": "productivity",
+      "tags": ["messaging", "agents", "tailscale", "fleet"],
+      "homepage": "https://github.com/craftale-agency/interserver",
+      "license": "MIT"
+    }
+  ]
+}
