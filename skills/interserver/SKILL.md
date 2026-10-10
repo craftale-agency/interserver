@@ -24,6 +24,7 @@ Everything below assumes the upstream plugin (`inter-session`) is installed.
 | `/interserver setup hub` | Make THIS machine the hub |
 | `/interserver setup spoke --hub <ip>` | Make THIS machine a spoke of that hub |
 | `/interserver setup hooks` | Install the guaranteed-delivery inbox hooks (Stop + SessionStart) |
+| `/interserver setup watchdog` | Install the auto-rearm watchdog (monitors never stay dead) |
 | `/interserver doctor` | Diagnose + auto-repair the local lane |
 | `/interserver rearm` | Clean stale seats + respawn clients (after `/compact`) |
 
@@ -145,6 +146,29 @@ was dead — message loss becomes impossible), and:
 
 Idempotent: the watermark advances on handover, so replays never re-trigger.
 Reactions follow the standard protocol (`request:`/`done:`/`question:`).
+
+## setup watchdog — monitors never stay dead
+
+Monitors die (kill, crash, session churn). The watchdog re-seats every Claude
+session on this machine within one scheduling interval:
+
+1. Install to a stable path:
+   ```bash
+   cp <plugin-root>/scripts/watchdog.sh ~/.claude/data/inter-session/watchdog.sh
+   ```
+2. Schedule it (health-check — cron is legitimate here, unlike collaboration):
+   - cron (macOS/Linux): `*/5 * * * * bash ~/.claude/data/inter-session/watchdog.sh`
+   - or self-daemonize: `nohup bash ~/.claude/data/inter-session/watchdog.sh --loop 30 >> ~/.inter-session/watchdog-loop.log 2>&1 &`
+3. What it does, every run: for each running `claude` main process, if its
+   monitor state (`clients/<ppid>.session`) is missing or its listener is
+   dead → respawn a monitor keyed to that session via
+   `INTER_SESSION_PPID_OVERRIDE`, reusing the previous seat name when known.
+   Log: `~/.inter-session/watchdog.log`.
+
+Field-tested 2026-10-10: monitor killed by hand → watchdog re-armed the seat
+in ~8s. Combined with the inbox hooks (which pull from the hub and cover the
+death window), message loss is impossible and dead time is bounded by the
+scheduling interval.
 
 ## doctor
 
