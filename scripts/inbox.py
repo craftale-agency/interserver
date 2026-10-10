@@ -67,19 +67,50 @@ def session_id_from_stdin() -> str:
     return "manual"
 
 
-def my_seat_name(session_id: str) -> str:
-    """Seat name for this session, from clients/*.session (may be empty)."""
-    cdir = DATA / "clients"
-    if not cdir.is_dir():
-        return ""
-    for f in cdir.glob("*.session"):
+def my_identity(seed_session_id: str) -> tuple:
+    """(session_ids, seat_names) this process belongs to.
+
+    Two seat styles exist: monitors spawned INSIDE a Claude session register
+    with the session_id (match by id), and watchdog-rearmed monitors spawned
+    OUTSIDE register under the claude main pid (match by name). We walk the
+    process ancestry to the claude main pid, read its state, and collect both.
+    """
+    ids = {seed_session_id} if seed_session_id else set()
+    names = set()
+    pid = os.getppid()
+    claude_pid = None
+    for _ in range(12):
+        if pid <= 1:
+            break
+        comm = ""
         try:
-            d = json.loads(f.read_text())
+            r = subprocess.run(["ps", "-o", "comm=", "-p", str(pid)],
+                               capture_output=True, text=True, timeout=2)
+            comm = (r.stdout.strip().split("/")[-1] or "")
         except Exception:
-            continue
-        if d.get("session_id") == session_id:
-            return d.get("name", "")
-    return ""
+            break
+        if comm == "claude":
+            claude_pid = pid
+            break
+        try:
+            r = subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)],
+                               capture_output=True, text=True, timeout=2)
+            pid = int(r.stdout.strip() or 0)
+        except Exception:
+            break
+    cdir = DATA / "clients"
+    if cdir.is_dir():
+        for f in cdir.glob("*.session"):
+            try:
+                d = json.loads(f.read_text())
+            except Exception:
+                continue
+            if (claude_pid and f.stem == str(claude_pid)) or d.get("session_id") in ids:
+                if d.get("name"):
+                    names.add(d["name"])
+                if d.get("session_id"):
+                    ids.add(d["session_id"])
+    return ids, names
 
 
 def watermark_path(session_id: str) -> Path:
@@ -133,16 +164,17 @@ def fetch_entries() -> list:
         return []
 
 
-def unread(entries: list, session_id: str, seat: str, since: str) -> list:
+def unread(entries: list, ids: set, names: set, since: str) -> list:
     hits = []
     for e in entries:
         ts = (e.get("ts") or "")[:19]
         if not ts or ts <= since:
             continue
         frm = e.get("from_name") or ""
-        if seat and frm == seat:
+        if frm in names or (not frm and not e.get("kind")):
             continue
-        if e.get("kind") == "broadcast" or e.get("to_session_id") == session_id:
+        if e.get("kind") == "broadcast" or e.get("to_session_id") in ids \
+                or e.get("to") in names:
             hits.append(e)
     return hits
 
@@ -169,13 +201,13 @@ def main() -> int:
     session_id = session_id_from_stdin() if mode in ("stop", "start") else "manual"
     floor = lookback_floor(lookback)
     since = read_watermark(session_id, floor)
-    seat = my_seat_name(session_id)
-    msgs = unread(fetch_entries(), session_id, seat, since)
+    ids, names = my_identity(session_id if mode in ("stop", "start") else "")
+    msgs = unread(fetch_entries(), ids, names, since)
 
     if not msgs:
         if mode == "check":  # report even when empty; hooks stay silent
-            print(f"unread for {session_id}" +
-                  (f" (seat {seat})" if seat else "") + ": 0 (since " + since + ")")
+            label = ",".join(sorted(names)) or session_id
+            print(f"unread for {label}: 0 (since {since})")
         return 0  # nothing to hand over: hooks exit silently
 
     newest = max((e.get("ts") or since)[:19] for e in msgs)
@@ -184,8 +216,8 @@ def main() -> int:
     n = len(msgs)
 
     if mode == "check":
-        print(f"unread for {session_id}" + (f" (seat {seat})" if seat else "") +
-              f": {n}")
+        label = ",".join(sorted(names)) or session_id
+        print(f"unread for {label}: {n}")
         print(body)
         print(f"(watermark not advanced in check mode: {since})")
         return 0

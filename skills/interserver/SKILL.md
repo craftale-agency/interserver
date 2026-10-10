@@ -25,6 +25,7 @@ Everything below assumes the upstream plugin (`inter-session`) is installed.
 | `/interserver setup spoke --hub <ip>` | Make THIS machine a spoke of that hub |
 | `/interserver setup hooks` | Install the guaranteed-delivery inbox hooks (Stop + SessionStart) |
 | `/interserver setup watchdog` | Install the auto-rearm watchdog (monitors never stay dead) |
+| `/interserver notify <text> --to <seat>\|--all` | Send a bus message from ANY process (cron, git hooks, CI) — activates an agent |
 | `/interserver doctor` | Diagnose + auto-repair the local lane |
 | `/interserver rearm` | Clean stale seats + respawn clients (after `/compact`) |
 
@@ -169,6 +170,29 @@ Field-tested 2026-10-10: monitor killed by hand → watchdog re-armed the seat
 in ~8s. Combined with the inbox hooks (which pull from the hub and cover the
 death window), message loss is impossible and dead time is bounded by the
 scheduling interval.
+
+## notify — activate an agent from ANY process
+
+`scripts/notify.sh "<text>" --to <seat> | --all` sends a bus message from
+non-Claude processes (cron briefs, git post-receive hooks, CI, file watchers).
+Gateway pattern: it borrows the credentials of the first healthy seat on this
+machine (message shows that seat as sender — say who you really are in the
+text, e.g. `"from git-hook: push on repo X"`). Pin a specific gateway with
+`INTERSERVER_GATEWAY_SEAT=<ppid-key>`. Exit 0 silent = delivered.
+
+Install beside the other scripts: `cp scripts/notify.sh ~/.claude/data/inter-session/`.
+
+Examples:
+```bash
+# cron: morning brief to an orchestrator seat
+15 8 * * * bash ~/.claude/data/inter-session/notify.sh "morning brief: list today's fleet tasks" --to craftbrain
+
+# git post-receive: activate the agent of that repo
+bash ~/.claude/data/inter-session/notify.sh "from git-hook: push su $(basename $PWD) — review?" --to maintainer-seat
+```
+
+Note: `cannot send to self` means the borrowed gateway IS the target — pick
+another gateway seat.
 
 ## doctor
 
