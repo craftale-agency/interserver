@@ -10,3 +10,4 @@ server.log
 __pycache__/
 *.pyc
 /tmp/
+__pycache__/
