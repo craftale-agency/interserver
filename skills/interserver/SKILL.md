@@ -23,6 +23,7 @@ Everything below assumes the upstream plugin (`inter-session`) is installed.
 | `/interserver help` | Show this command overview |
 | `/interserver setup hub` | Make THIS machine the hub |
 | `/interserver setup spoke --hub <ip>` | Make THIS machine a spoke of that hub |
+| `/interserver setup hooks` | Install the guaranteed-delivery inbox hooks (Stop + SessionStart) |
 | `/interserver doctor` | Diagnose + auto-repair the local lane |
 | `/interserver rearm` | Clean stale seats + respawn clients (after `/compact`) |
 
@@ -106,6 +107,44 @@ agents. Point to `setup` for new machines and `doctor` when messages don't flow.
 6. **Enroll the token** (one shared fleet token): copy the hub's
    `~/.claude/data/inter-session/token` via ssh+scp (mode 600). Compare hashes
    (`md5sum`/`md5 -q`), never print the value.
+
+## setup hooks — guaranteed-delivery inbox
+
+Turns "message that maybe wakes the agent" into "message that definitely
+activates the agent". Two Claude Code hooks + one script:
+
+1. **Install the script** to a plugin-update-proof path:
+   ```bash
+   cp <plugin-root>/scripts/inbox.py ~/.claude/data/inter-session/inbox.py
+   ```
+2. **Merge the hooks** into `~/.claude/settings.json` (backup first; merge,
+   never overwrite existing hook groups):
+   ```json
+   {"hooks": {
+     "Stop":        [{"matcher":"","hooks":[{"type":"command",
+        "command":"python3 $HOME/.claude/data/inter-session/inbox.py --hook stop"}]}],
+     "SessionStart":[{"matcher":"","hooks":[{"type":"command",
+        "command":"python3 $HOME/.claude/data/inter-session/inbox.py --hook start"}]}]
+   }}
+   ```
+3. **Env** (where to read the authoritative log — the HUB writes messages.log,
+   spokes' local copy is stale island-era data):
+   - `INTERSERVER_HUB_SSH` (default `nebula`) — ssh target of the hub
+   - `INTERSERVER_HUB_LOG` (default `/home/ppezz/.claude/data/inter-session/messages.log`)
+   - On the hub machine itself: set `INTERSERVER_HUB_SSH=none` (ssh fails fast → falls back to the local, authoritative log)
+
+**How it works:** `inbox.py` keeps a per-session watermark
+(`~/.claude/data/inter-session/inbox-<session_id>.watermark`), pulls the hub's
+`messages.log` tail over ssh (this also covers messages missed while a monitor
+was dead — message loss becomes impossible), and:
+- **Stop hook**: unread at end of turn → `{"decision":"block","reason":<msgs>}`
+  → the agent does NOT stop, it processes them and then finishes
+- **SessionStart hook**: unread accumulated while closed → injected as
+  `additionalContext` on open
+- **`--hook check`**: manual CLI debugging (`unread for <sid>: N ...`)
+
+Idempotent: the watermark advances on handover, so replays never re-trigger.
+Reactions follow the standard protocol (`request:`/`done:`/`question:`).
 
 ## doctor
 
