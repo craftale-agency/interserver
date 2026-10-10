@@ -18,10 +18,45 @@ Everything below assumes the upstream plugin (`inter-session`) is installed.
 
 | User input | Action |
 | :--- | :--- |
+| `/interserver list` | List seats on the federated bus (via the lane — you see ALL machines) |
+| `/interserver connect <name>` | Connect this session as a seat (same as upstream connect; the lane does federation) |
+| `/interserver help` | Show this command overview |
 | `/interserver setup hub` | Make THIS machine the hub |
 | `/interserver setup spoke --hub <ip>` | Make THIS machine a spoke of that hub |
 | `/interserver doctor` | Diagnose + auto-repair the local lane |
 | `/interserver rearm` | Clean stale seats + respawn clients (after `/compact`) |
+
+## list — federated seat list
+
+Run the upstream list through the lane:
+
+```
+Bash("python3 <upstream-bin>/list.py")
+```
+
+`<upstream-bin>` = the inter-session plugin's `skills/inter-session/bin`
+directory. On a healthy spoke this returns seats from ALL machines (hub side
+included) — that's the federation working. Only local seats = lane problem →
+suggest `/interserver doctor`.
+
+## connect — seat on the federated bus
+
+Identical to upstream `/inter-session connect <name>`, but on a spoke it lands
+on the global bus automatically (lane or `INTER_SESSION_HOST` does it):
+
+```
+Monitor(command="python3 <upstream-bin>/client.py --name <name>",
+        description="inter-session messages", persistent=true, timeout_ms=3600000)
+```
+
+Validate the name (`^[a-z0-9][a-z0-9-]{0,39}$`); on "another monitor already
+running" surface the existing name and stop.
+
+## help
+
+Reply with the subcommand table above, plus one line on architecture:
+hub binds the tailnet IP; spokes forward `127.0.0.1:9473` to it; seats are the
+agents. Point to `setup` for new machines and `doctor` when messages don't flow.
 
 ## setup hub
 
