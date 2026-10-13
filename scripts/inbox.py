@@ -164,6 +164,24 @@ def fetch_entries() -> list:
         return []
 
 
+def broadcast_targets_me(entry: dict, names: set) -> bool:
+    """A broadcast concerns me ONLY if its text explicitly calls me
+    (@<seat>, to:<seat>) or is for everyone (@all). Untagged broadcasts are
+    informational — they must not hijack every agent's end-of-turn.
+    Fails-open when identity is unknown (no seat yet)."""
+    if not names:
+        return True
+    text = entry.get("text") or ""
+    if re.search(r"(?:^|\W)@all\b", text, re.IGNORECASE):
+        return True
+    for n in names:
+        if re.search(r"(?:^|\W)@%s\b" % re.escape(n), text, re.IGNORECASE):
+            return True
+        if re.search(r"(?:^|\W)to:%s\b" % re.escape(n), text, re.IGNORECASE):
+            return True
+    return False
+
+
 def unread(entries: list, ids: set, names: set, since: str) -> list:
     hits = []
     for e in entries:
@@ -173,8 +191,9 @@ def unread(entries: list, ids: set, names: set, since: str) -> list:
         frm = e.get("from_name") or ""
         if frm in names or (not frm and not e.get("kind")):
             continue
-        if e.get("kind") == "broadcast" or e.get("to_session_id") in ids \
-                or e.get("to") in names:
+        if e.get("to_session_id") in ids or e.get("to") in names:
+            hits.append(e)
+        elif e.get("kind") == "broadcast" and broadcast_targets_me(e, names):
             hits.append(e)
     return hits
 

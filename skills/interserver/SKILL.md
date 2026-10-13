@@ -26,6 +26,7 @@ Everything below assumes the upstream plugin (`inter-session`) is installed.
 | `/interserver setup hooks` | Install the guaranteed-delivery inbox hooks (Stop + SessionStart) |
 | `/interserver setup watchdog` | Install the auto-rearm watchdog (monitors never stay dead) |
 | `/interserver notify <text> --to <seat>\|--all` | Send a bus message from ANY process (cron, git hooks, CI) — activates an agent |
+| `/interserver sync <seat> [text]` | Synchronous in-turn exchange with ONE agent: sends `request:sync`, waits (≤120s), prints the reply. Also invocable as `/intersession sync` |
 | `/interserver doctor` | Diagnose + auto-repair the local lane |
 | `/interserver rearm` | Clean stale seats + respawn clients (after `/compact`) |
 
@@ -147,6 +148,11 @@ was dead — message loss becomes impossible), and:
 
 Idempotent: the watermark advances on handover, so replays never re-trigger.
 Reactions follow the standard protocol (`request:`/`done:`/`question:`).
+**Targeting** (since 2026-10-13): untagged broadcasts do NOT block the
+Stop hook — only broadcasts whose text contains `@<this seat>` / `to:<this
+seat>` / `@all`, plus direct messages, activate an agent. Direct messages
+always block. This stops fleet-wide end-of-turn hijacks by non-addressed
+broadcasts.
 
 ## setup watchdog — monitors never stay dead
 
@@ -193,6 +199,34 @@ bash ~/.claude/data/inter-session/notify.sh "from git-hook: push su $(basename $
 
 Note: `cannot send to self` means the borrowed gateway IS the target — pick
 another gateway seat.
+
+**Broadcast targeting rule**: untagged broadcasts are informational only —
+the inbox hooks do NOT block an agent's end-of-turn for them. To actually
+ACTIVATE agents, target explicitly: prefix the text with `@<seat>` (one or
+more) or `@all` (everyone). Direct sends (`--to`) are always activating.
+
+## sync — synchronous agent exchange
+
+`scripts/sync.py <seat> [opener text] [--timeout <s>]` opens a synchronous,
+in-turn exchange with one agent — the formalized version of the manual
+`send → wait → grep` pattern:
+
+1. Verifies `<seat>` is on the bus (clear error + seat list if not)
+2. Sends `request:sync` (+ your opener) via the gateway pattern
+3. Polls the hub's `messages.log` every 5s for a reply from that seat
+   (`answer:`/`status:`/`done:`/`question:`), up to `--timeout` (default 120s)
+4. Prints the reply to stdout → the calling session processes it in the
+   same turn
+
+```bash
+python3 ~/.claude/data/inter-session/sync.py nebula "status migrazione?"
+# [nebula] status: migrazione — drive 75 file, token morto, ...
+```
+
+Timeout diagnostics distinguish a busy seat (alive but mid-turn) from a dead
+monitor (suggest `/interserver doctor` on its machine). Compatible with the
+upstream `inter-session` skill: invoking `/intersession sync <seat>` routes
+here — no upstream changes needed.
 
 ## doctor
 
