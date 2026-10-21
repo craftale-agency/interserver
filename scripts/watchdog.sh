@@ -66,7 +66,19 @@ run_once() {
       armed=$((armed+1))
     fi
   done
-  say "watchdog: $ok healthy, $armed re-armed"
+  # reap seat clients whose claude TUI no longer exists (quit = actually gone)
+  local reaped=0
+  for cpid in $(ps -eo pid=,command= | awk '/[c]lient\.py --name seat-/{print $1}'); do
+    local seat
+    seat=$(ps -p "$cpid" -o command= | sed -E 's/.*--name seat-([0-9]+).*/\1/')
+    if ! kill -0 "$seat" 2>/dev/null; then
+      if kill "$cpid" 2>/dev/null; then
+        reaped=$((reaped+1))
+        say "REAP: stale seat client $cpid (seat-$seat, TUI gone)"
+      fi
+    fi
+  done
+  say "watchdog: $ok healthy, $armed re-armed, $reaped stale seat(s) reaped"
 }
 
 while [ $# -gt 0 ]; do
