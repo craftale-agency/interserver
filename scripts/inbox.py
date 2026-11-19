@@ -191,7 +191,17 @@ def unread(entries: list, ids: set, names: set, since: str) -> list:
         frm = e.get("from_name") or ""
         if frm in names or (not frm and not e.get("kind")):
             continue
-        if e.get("to_session_id") in ids or e.get("to") in names:
+        sid = e.get("to_session_id") or ""
+        if sid:
+            # Deterministic routing: the hub stamps the recipient's
+            # session_id at delivery time. A seat NAME can be re-held by a
+            # different session later (watchdog respawn, name takeover), but
+            # the session_id never lies — only claim stamped messages that
+            # are addressed to one of OUR sessions.
+            if sid in ids:
+                hits.append(e)
+        elif e.get("to") in names:
+            # Legacy journal entries from pre-stamping hubs: name fallback.
             hits.append(e)
         elif e.get("kind") == "broadcast" and broadcast_targets_me(e, names):
             hits.append(e)
