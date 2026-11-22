@@ -1,119 +1,149 @@
 #!/usr/bin/env python3
-"""sync.py — allineamento flotta su un obiettivo condiviso (protocollo sync v1).
+"""sync.py — synchronous in-turn exchange with one agent on the bus.
 
-Uso:
-  sync.py --objective "portare X in produzione" --to nebula,craftops-1,craftlead-2
-  sync.py --objective "..." --to a,b --wait-min 15 --lock
+  sync.py <seat> [opener text] [--timeout <seconds>]
 
-Cosa fa:
-  1. invia a ogni target un messaggio `sync <sid>:` con l'obiettivo
-  2. aspetta da ogni target una `answer:` che quoti <sid> con la struttura
-     role / plan / deps / state (cosa contribuisce col suo ambiente/ruolo,
-     cosa farà, da chi dipende, cosa ha già in corso)
-  3. stampa la tabella di allineamento; con --lock invia il brief consolidato
-     `status: sync locked <sid>` a tutti i target (da quel momento si torna
-     al reporting normale status:/done:)
+Sends a `request:sync` (with optional opener), then polls the hub's
+messages.log until <seat> replies (answer:/status:/done:/question:), and
+prints the reply to stdout — so the calling session processes it in the
+same turn. This formalizes the manual send→wait→grep pattern used during
+the 2026-10 migration epic.
 
-Protocollo (vedi README sezione "Sync protocol"):
-  sync <sid>: <obiettivo>   → richiesta di allineamento (agire SOLO dopo lock)
-  answer <sid>: role/plan/deps/state → ack del singolo agente
-  status: sync locked <sid> → obiettivo assegnato, si esegue
+Exit codes: 0 reply printed · 2 seat not found · 3 timeout · 4 send failed.
 """
-from __future__ import annotations
-
-import argparse
-import json
 import os
+import re
 import subprocess
 import sys
 import time
-import uuid
-from datetime import datetime, timezone
-from pathlib import Path
 
+DATA = os.path.expanduser("~/.claude/data/inter-session")
 HUB_SSH = os.environ.get("INTERSERVER_HUB_SSH", "nebula")
 HUB_LOG = os.environ.get(
     "INTERSERVER_HUB_LOG",
     "/home/ppezz/.claude/data/inter-session/messages.log")
-SEND = subprocess.run(
-    ["ls", "-d", str(Path.home()
-     / ".claude/plugins/cache/inter-session/inter-session/*/skills/inter-session/bin/send.py")],
-    capture_output=True, text=True).stdout.split()
-SEND = SEND[-1] if SEND else "send.py"
+POLL_SECONDS = 5
+DEFAULT_TIMEOUT = 120
 
 
-def send(to: str, text: str) -> bool:
-    r = subprocess.run([sys.executable, SEND, "--to", to, "--text", text],
-                       capture_output=True, text=True)
-    if r.returncode != 0:
-        print(f"  ! send a {to} fallito: {r.stderr.strip()}", file=sys.stderr)
+def plugin_bin() -> str:
+    import glob
+    cands = sorted(glob.glob(os.path.expanduser(
+        "~/.claude/plugins/cache/inter-session/inter-session/*/skills/inter-session/bin")))
+    if not cands:
+        sys.exit("plugin bin not found")
+    return cands[-1]
+
+
+def run(cmd, timeout=15):
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+
+def list_seats():
+    r = run(["python3", os.path.join(plugin_bin(), "list.py")])
+    seats = []
+    for line in r.stdout.splitlines():
+        m = re.match(r"([a-z0-9][a-z0-9-]*)\s", line)
+        if m:
+            seats.append(m.group(1))
+    return seats
+
+
+def send(target, text):
+    """Send via a live seat's credentials (gateway pattern, like notify.sh)."""
+    import json
+    key = None
+    cdir = os.path.join(DATA, "clients")
+    for f in sorted(os.listdir(cdir) if os.path.isdir(cdir) else [], reverse=True):
+        if not f.endswith(".session"):
+            continue
+        try:
+            d = json.loads(open(os.path.join(cdir, f)).read())
+        except Exception:
+            continue
+        lp = d.get("listener_pid", 0)
+        try:
+            os.kill(int(lp), 0)
+        except (OSError, ValueError):
+            continue
+        if d.get("name") != target:  # never gateway via the target itself
+            key = f.split(".")[0]
+            gw_name = d.get("name") or key
+            break
+    if key is None:
         return False
-    return True
-
-
-def fetch_entries(lines: int = 300) -> list:
+    env = dict(os.environ, INTER_SESSION_PPID_OVERRIDE=key,
+               INTERSERVER_ME=gw_name)
     r = subprocess.run(
-        ["ssh", HUB_SSH, f"tail -n {lines} {HUB_LOG}"],
-        capture_output=True, text=True)
+        ["python3", os.path.join(plugin_bin(), "send.py"),
+         "--to", target, "--text", text.replace("(from caller)",
+                                                 "(from %s)" % gw_name)],
+        capture_output=True, text=True, timeout=15, env=env)
+    return r.returncode == 0
+
+
+def hub_entries():
+    r = run(["ssh", "-o", "ConnectTimeout=4", "-o", "BatchMode=yes",
+             HUB_SSH, "tail -n 200 %s" % HUB_LOG], timeout=10)
     out = []
-    for line in (r.stdout or "").splitlines():
+    import json
+    for line in r.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
         try:
             out.append(json.loads(line))
-        except json.JSONDecodeError:
-            pass
+        except ValueError:
+            continue
     return out
 
 
-def main() -> int:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--objective", required=True)
-    ap.add_argument("--to", required=True, help="seat names, comma separated")
-    ap.add_argument("--wait-min", type=int, default=10)
-    ap.add_argument("--lock", action="store_true",
-                    help="dopo gli ack invia il brief consolidato")
-    args = ap.parse_args()
+def main():
+    args = sys.argv[1:]
+    timeout = DEFAULT_TIMEOUT
+    if "--timeout" in args:
+        i = args.index("--timeout")
+        try:
+            timeout = int(args[i + 1])
+        except (ValueError, IndexError):
+            pass
+        args = [a for j, a in enumerate(args) if j not in (i, i + 1)]
+    if not args:
+        sys.exit("usage: sync.py <seat> [opener] [--timeout <s>]")
+    target, opener = args[0], " ".join(args[1:])
 
-    targets = [t.strip() for t in args.to.split(",") if t.strip()]
-    sid = uuid.uuid4().hex[:6]
-    print(f"sync {sid}: {args.objective}")
-    print(f"targets: {', '.join(targets)} (attesa ack fino a {args.wait_min}m)\n")
+    seats = list_seats()
+    if target not in seats:
+        print("seat '%s' not on the bus. Connected: %s" %
+              (target, ", ".join(seats) or "(none)"), file=sys.stderr)
+        sys.exit(2)
 
-    ask = (f"sync {sid} (protocollo sync v1 — allineamento, NON agire ancora): "
-           f"{args.objective} — rispondi `answer {sid}:` con role/plan/deps/state: "
-           f"role=cosa contribuisci col tuo ambiente/ruolo/conoscenza, "
-           f"plan=azioni concrete tue, deps=da chi/dipendenze, "
-           f"state=cosa hai gia in corso su questo obiettivo.")
-    for t in targets:
-        send(t, ask)
+    msg = ("request:sync (from %s) — synchronous channel open: reply now with "
+           "answer:/status: in this turn"
+           % os.environ.get("INTERSERVER_ME", "maintenance"))
+    if opener:
+        msg += " — " + opener
+    if not send(target, msg):
+        print("send failed (no live gateway seat)", file=sys.stderr)
+        sys.exit(4)
 
-    deadline = time.time() + args.wait_min * 60
-    acks: dict[str, str] = {}
-    while time.time() < deadline and len(acks) < len(targets):
-        time.sleep(20)
-        for e in fetch_entries():
-            frm = e.get("from_name") or ""
-            txt = (e.get("text") or "")
-            if frm in targets and frm not in acks and sid in txt \
-                    and txt.strip().lower().startswith("answer"):
-                acks[frm] = txt
-                print(f"[ack] {frm}: {txt[:200]}")
-        print(f"  ... {len(acks)}/{len(targets)} ack "
-              f"({datetime.now(timezone.utc).strftime('%H:%M:%SZ')})")
-
-    print()
-    missing = [t for t in targets if t not in acks]
-    if missing:
-        print(f"SENZA ack: {', '.join(missing)} — sono idle o al confine turno; "
-              f"ricalcola o re-invoca sync piu tardi.")
-    if acks and args.lock:
-        brief = "; ".join(f"{t}: {acks[t][:150]}" for t in acks)
-        for t in targets:
-            send(t, f"status: sync locked {sid} — obiettivo ASSEGNATO, si esegue "
-                    f"secondo il proprio plan; reporting status:/done: come da protocollo. "
-                    f"Plani ricevuti — {brief}")
-        print(f"sync locked {sid} inviato a {', '.join(targets)}")
-    return 0 if not missing else 2
+    t0 = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime())
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        time.sleep(POLL_SECONDS)
+        for e in hub_entries():
+            ts = (e.get("ts") or "")[:19]
+            if ts <= t0 or e.get("from_name") != target:
+                continue
+            text = (e.get("text") or "").strip()
+            if text.startswith(("answer:", "status:", "done:", "question:")):
+                print("[%s] %s" % (target, text))
+                return 0
+    print("timeout (%ds): %s didn't reply — seat alive but busy, or monitor "
+          "down (try /interserver doctor on its machine)" % (timeout, target),
+          file=sys.stderr)
+    sys.exit(3)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

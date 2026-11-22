@@ -93,7 +93,7 @@ Rules:
 4. **Seat names, not seat-\*.** Long threads only between named seats
    (anonymous `seat-<pid>` is ephemeral — protocol rule since 2026-11-20).
 
-Tooling: `scripts/sync.py --objective "..." --to a,b,c [--lock]` sends the
+Tooling: `scripts/align.py --objective "..." --to a,b,c [--lock]` sends the
 requests, polls the hub journal for acks, prints the alignment table and
 (optionally) broadcasts the locked brief.
 
