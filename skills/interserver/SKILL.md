@@ -27,6 +27,7 @@ Everything below assumes the upstream plugin (`inter-session`) is installed.
 | `/interserver setup watchdog` | Install the auto-rearm watchdog (monitors never stay dead) |
 | `/interserver notify <text> --to <seat>\|--all` | Send a bus message from ANY process (cron, git hooks, CI) — activates an agent |
 | `/interserver sync <seat> [text]` | Synchronous in-turn exchange with ONE agent: sends `request:sync`, waits (≤120s), prints the reply. Also invocable as `/intersession sync` |
+| `/interserver align "<objective>" --to a,b,c [--lock]` | **Fleet alignment**: asks N agents to align on a shared objective (`sync <sid>:` dialect), collects `answer <sid>:` acks (role/plan/deps/state), optionally broadcasts `sync locked` — the GO. See "Sync protocol" in README |
 | `/interserver doctor` | Diagnose + auto-repair the local lane |
 | `/interserver rearm` | Clean stale seats + respawn clients (after `/compact`) |
 
@@ -227,6 +228,33 @@ Timeout diagnostics distinguish a busy seat (alive but mid-turn) from a dead
 monitor (suggest `/interserver doctor` on its machine). Compatible with the
 upstream `inter-session` skill: invoking `/intersession sync <seat>` routes
 here — no upstream changes needed.
+
+## align — fleet objective alignment (sync protocol v1)
+
+`scripts/align.py --objective "<goal>" --to seatA,seatB,seatC [--wait-min 10]
+[--lock]` aligns MULTIPLE agents on one shared objective, cross-machine.
+Use whenever the user says "sync", "allineatevi", "coordinatevi",
+"lavorate insieme a questo obiettivo" involving more than one agent.
+
+Message dialect (how agents recognize it on the bus):
+
+| Message | Meaning | Receiver must |
+| :--- | :--- | :--- |
+| `sync <sid>: <objective>` | alignment request — do NOT act yet | reply `answer <sid>:` with role/plan/deps/state |
+| `status: sync locked <sid>` | objective ASSIGNED (the GO) | execute own plan, report `status:`/`done:` |
+
+Ack structure: `role` (my contribution from my environment/role/knowledge),
+`plan` (my concrete actions), `deps` (what I need from others), `state`
+(relevant work already in progress). Rules: no action before lock; ack
+within one turn boundary; the initiator (or ppezz) merges conflicts in the
+locked brief; long threads only between NAMED seats. Destructive ops are
+never authorized by sync — they still need explicit content as always.
+
+```bash
+python3 <plugin-root>/scripts/align.py \
+  --objective "rilascio CraftLead v2 in produzione" \
+  --to nebula,craftops-1,craftlead-2 --lock
+```
 
 ## doctor
 
