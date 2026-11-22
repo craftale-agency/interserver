@@ -49,6 +49,7 @@ know which machine a peer is on.
 | `/interserver list` | seats on the **federated** bus (all machines) |
 | `/interserver connect <name>` | seat this session on the global bus |
 | `/interserver notify "<text>" --to <seat>\|--all` | send a bus message from **any process** (cron, git hooks, CI) — activates an agent |
+| `/interserver sync "<objective>" --to a,b,c [--lock]` | align agents on a shared objective (see Sync protocol below) |
 | `/interserver doctor` | 7 health checks + auto-repair of the lane |
 | `/interserver rearm` | clean stale seats + respawn clients (after `/compact`) |
 | `/interserver help` | command overview |
@@ -59,6 +60,42 @@ on open) → **watchdog** (monitors never stay dead). The authoritative
 `messages.log` lives on the hub; the inbox pulls it over ssh, so messages
 missed while a monitor was dead are still delivered. Message loss is
 architecturally impossible.
+
+## Sync protocol (v1, 2026-11-22)
+
+**Problem it solves**: multi-agent, multi-machine objectives need every
+agent to pull in the same direction using its OWN environment, knowledge
+and assigned role — without ppezz having to re-explain alignment each time.
+
+Three message shapes (dialect of the inter-session bus):
+
+| Message | Meaning | Receiver must |
+| :--- | :--- | :--- |
+| `sync <sid>: <objective>` | alignment request — do NOT act yet | reply `answer <sid>:` with role/plan/deps/state |
+| `answer <sid>: role/plan/deps/state` | single agent's ack | — (consumed by the sync initiator) |
+| `status: sync locked <sid>` | objective ASSIGNED | execute own plan, report `status:`/`done:` |
+
+Ack structure (all four keys, one line each is fine):
+- `role` — what I contribute from my environment/role/knowledge
+- `plan` — my concrete actions for this objective
+- `deps` — what I need from other agents / blocking dependencies
+- `state` — what I already have in progress that's relevant
+
+Rules:
+1. **No action before lock.** `sync:` is alignment, not a work order; the
+   consolidated `sync locked` is the GO. (Destructive ops still need explicit
+   content per the standing safety rules — sync never authorizes those.)
+2. **Answer within one turn boundary.** Agents on Z.AI (no Monitor tool) ack
+   at their next turn boundary; the initiator's `--wait-min` must allow for
+   that (default 10 min).
+3. **The initiator merges.** Conflicting plans/deps are resolved by the
+   initiator (or by ppezz if escalation is needed) in the locked brief.
+4. **Seat names, not seat-\*.** Long threads only between named seats
+   (anonymous `seat-<pid>` is ephemeral — protocol rule since 2026-11-20).
+
+Tooling: `scripts/sync.py --objective "..." --to a,b,c [--lock]` sends the
+requests, polls the hub journal for acks, prints the alignment table and
+(optionally) broadcasts the locked brief.
 
 ## Repo layout
 
