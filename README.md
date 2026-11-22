@@ -92,6 +92,17 @@ Rules:
    initiator (or by ppezz if escalation is needed) in the locked brief.
 4. **Seat names, not seat-\*.** Long threads only between named seats
    (anonymous `seat-<pid>` is ephemeral — protocol rule since 2026-11-20).
+5. **Retry the SAME sid.** If an agent hasn't acked yet, re-send the sync
+   quoting the existing `<sid>` — never mint a new sid for the same objective
+   (duplicate sids fork the alignment: seen live on 2026-11-22 with three
+   sids for one deploy window).
+6. **Idle wakeups cost tokens — guard them.** Autonomous wake cycles
+   (digest/morning/agent-activation crons) must exit BEFORE invoking the LLM
+   when there is nothing to do. Guard = `scripts/wake-guard.sh`: exits 0
+   (skip) unless at least one `~/.inter-session/sync-active-*` flag exists OR
+   the bus inbox has unread messages. Lock flow: the executor touches
+   `sync-active-<sid>` when starting a locked objective and removes it as the
+   LAST step of the plan (the initiator verifies removal in the brief).
 
 Tooling: `scripts/align.py --objective "..." --to a,b,c [--lock]` sends the
 requests, polls the hub journal for acks, prints the alignment table and
