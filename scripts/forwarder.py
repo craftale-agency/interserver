@@ -33,6 +33,11 @@ def handle(client):
     except OSError:
         client.close()
         return
+    # Il timeout di connect non deve valere anche per recv: lasciato attivo,
+    # il pump upstream->client muore dopo 10s di silenzio dell'hub e il
+    # client si riconnette (lane vuota: ogni ~10s). La lato client la
+    # chiusura la decide il websocket (ping/pong del protocollo).
+    upstream.settimeout(None)
     threads = [
         threading.Thread(target=pump, args=(a, b), daemon=True)
         for a, b in ((client, upstream), (upstream, client))
